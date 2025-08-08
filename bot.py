@@ -1,5 +1,6 @@
 import discord
 from discord import app_commands
+from discord import embeds
 import os
 from dotenv import load_dotenv
 from datetime import datetime
@@ -62,6 +63,31 @@ async def coeur_command(interaction: discord.Interaction):
     ligne = e * 10  # 10 cœurs sur une ligne
     await interaction.response.send_message(ligne)
 
+@tree.command(name="8ball", description="Pose une question à la boule magique", guild=GUILD_ID)
+@app_commands.describe(question="Pose ta question existentielle ici")
+async def eightball(interaction: discord.Interaction, question: str):
+    réponses = [
+        ("✨ Absolument", "Les astres sont alignés."),
+        ("🌘 Non, et de loin", "Évite ça à tout prix."),
+        ("🌀 Peut-être", "Mais tu devras faire un choix bientôt."),
+        ("🔮 Je ne peux pas répondre", "Essaie de poser une question plus claire."),
+        ("🔥 Oui, fonce", "N’hésite plus une seconde."),
+        ("💀 Mauvaise idée", "Ça sent les ennuis."),
+        ("🧠 Réfléchis encore", "Tu connais déjà la réponse."),
+        ("🦋 Laisse le temps faire", "Tout s’éclairera.")
+    ]
+
+    titre, réponse = random.choice(réponses)
+
+    embed = Embed(
+        title="🎱 Boule magique",
+        description=f"**Question :** {question}",
+        color=random.choice([0x9b59b6, 0x3498db, 0xe74c3c, 0x2ecc71])
+    )
+    embed.add_field(name="🗯️ Réponse", value=f"{titre} – {réponse}", inline=False)
+    embed.set_footer(text=f"Demande de {interaction.user.display_name}")
+
+    await interaction.response.send_message(embed=embed)
 
 # Lancer le bot
 client.run(TOKEN)
