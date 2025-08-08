@@ -1,6 +1,6 @@
 import discord
 from discord import app_commands
-from discord import embeds
+from discord import embed
 import os
 from dotenv import load_dotenv
 from datetime import datetime
