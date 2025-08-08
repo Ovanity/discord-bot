@@ -1,5 +1,5 @@
 import discord
-from discord.ext import commands
+from discord import app_commands
 import os
 from dotenv import load_dotenv
 
@@ -7,16 +7,17 @@ load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
 intents = discord.Intents.default()
-intents.message_content = True  # ✅ obligatoire si tu veux !ping
+client = discord.Client(intents=intents)
+tree = app_commands.CommandTree(client)
 
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-@bot.event
+@client.event
 async def on_ready():
-    print(f"✅ Connecté en tant que {bot.user.name}")
+    print(f"✅ Connecté en tant que {client.user.name}")
+    await tree.sync()  # 👈 enregistre les slash commands
+    print("🔧 Slash commands synchronisées")
 
-@bot.command()
-async def ping(ctx):
-    await ctx.send("pong")
+@tree.command(name="ping", description="Répond pong")
+async def slash_ping(interaction: discord.Interaction):
+    await interaction.response.send_message("pong")
 
-bot.run(TOKEN)
+client.run(TOKEN)
