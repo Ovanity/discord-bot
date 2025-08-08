@@ -3,8 +3,10 @@ from discord import app_commands, Embed
 from discord.ext import tasks
 import os
 from dotenv import load_dotenv
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 import random
+import aiohttp
+import asyncio
 
 # ──────────────────── Variables d’environnement
 load_dotenv()
@@ -13,6 +15,7 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 # ──────────────────── IDs
 GUILD_ID = discord.Object(id=1403442529357267036)  # serveur cible
 CHANNEL_ID = 123456789012345678                   # ← ton salon texte
+FACT_CHANNEL_ID = CHANNEL_ID                      # même salon pour les faits aléatoires
 
 # ──────────────────── Intents et client
 intents = discord.Intents.default()
@@ -40,7 +43,6 @@ HOURLY_TEXT = {
 }
 
 def next_run_times() -> list[time]:
-    """Liste des horaires (07 h → 22 h) pour tasks.loop."""
     return [time(h) for h in HOURLY_TEXT]
 
 # ──────────────────── Tâche horaire
@@ -54,6 +56,38 @@ async def hourly_message():
     if msg:
         await channel.send(msg)
 
+# ──────────────────── Tâche pour faits aléatoires
+async def envoyer_fait_bienness():
+    await client.wait_until_ready()
+    horaires = [time(h, 30) for h in range(7, 22, 2)]
+
+    while not client.is_closed():
+        now = datetime.now()
+        prochain = None
+        for h in horaires:
+            if now.time() < h:
+                prochain = h
+                break
+        if not prochain:
+            next_run = datetime.combine(now.date() + timedelta(days=1), horaires[0])
+        else:
+            next_run = datetime.combine(now.date(), prochain)
+
+        wait_sec = (next_run - now).total_seconds()
+        print(f"Prochain fait à envoyer à {next_run.time()} (dans {int(wait_sec)}s)")
+        await asyncio.sleep(wait_sec)
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get("https://uselessfacts.jsph.pl/random.json?language=fr") as resp:
+                    data = await resp.json()
+                    fait = data.get("text", "Rien à déclarer.")
+            channel = client.get_channel(FACT_CHANNEL_ID)
+            if channel:
+                await channel.send(f"📚 Fait aléatoire : {fait}")
+        except Exception as e:
+            print(f"Erreur fetch fait : {e}")
+
 # ──────────────────── Événement ready
 @client.event
 async def on_ready():
@@ -61,8 +95,9 @@ async def on_ready():
     tree.copy_global_to(guild=GUILD_ID)
     await tree.sync(guild=GUILD_ID)
     await tree.sync()
-    hourly_message.start()        # démarre la tâche automatique
-    print("🔧 Slash commands synchronisées + Tâche horaire lancée")
+    hourly_message.start()
+    client.loop.create_task(envoyer_fait_bienness())
+    print("🔧 Slash commands synchronisées + Tâches démarrées")
 
 # ──────────────────── Commande love
 @tree.command(name="love", description="Depuis combien de temps vous êtes ensemble", guild=GUILD_ID)
