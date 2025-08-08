@@ -52,7 +52,7 @@ async def depuis_command(interaction: discord.Interaction):
 
     message = (
         f"🕰️ Ça fait **{mois} mois, {jours} jours** qu'on se parle.\n"
-        f"Chaque jour compte, Lilya. ❤️"
+        f"Chaque jour compte. ❤️"
     )
 
     # 🔓 Visible par tout le monde
