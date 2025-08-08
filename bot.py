@@ -33,7 +33,7 @@ async def on_ready():
 
 
 # Slash command disponible dans ton serveur uniquement pour l’instant
-@tree.command(name="ping", description="Répond pong", guild=GUILD_ID)
+@tree.command(name="ping", description="Répond pong yeah yeah ça fonctionne", guild=GUILD_ID)
 async def ping_command(interaction: discord.Interaction):
     await interaction.response.send_message("pong")
 
