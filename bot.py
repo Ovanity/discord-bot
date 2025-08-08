@@ -2,6 +2,7 @@ import discord
 from discord import app_commands
 import os
 from dotenv import load_dotenv
+from datetime import datetime
 
 # Charger les variables d'environnement (.env)
 load_dotenv()
@@ -36,6 +37,25 @@ async def on_ready():
 @tree.command(name="ping", description="Répond pong yeah yeah ça fonctionne", guild=GUILD_ID)
 async def ping_command(interaction: discord.Interaction):
     await interaction.response.send_message("pong")
+
+
+# Commande romantique /depuis
+@tree.command(name="depuis", description="Depuis combien de temps vous êtes ensemble", guild=GUILD_ID)
+async def depuis_command(interaction: discord.Interaction):
+    debut = datetime(2025, 3, 31)
+    maintenant = datetime.now()
+    difference = maintenant - debut
+
+    jours_total = difference.days
+    mois = jours_total // 30
+    jours = jours_total % 30
+
+    message = (
+        f"🕰️ Ça fait **{mois} mois, {jours} jours** qu'on se parle.\n"
+        f"Chaque jour compte, Lilya. ❤️"
+    )
+
+    await interaction.response.send_message(message, ephemeral=True)
 
 
 # Lancer le bot
