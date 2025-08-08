@@ -1,29 +1,42 @@
+import os
+import random
+import asyncio
+import logging
+from datetime import datetime, time, timedelta
+from zoneinfo import ZoneInfo
+
+import aiohttp
 import discord
 from discord import app_commands, Embed
 from discord.ext import tasks
-import os
 from dotenv import load_dotenv
-from datetime import datetime, time, timedelta
-import random
-import aiohttp
-import asyncio
+from dateutil.relativedelta import relativedelta  # pip install python-dateutil
 
-# ──────────────────── Variables d’environnement
+# ──────────────────── Config de base
 load_dotenv()
-TOKEN = os.getenv("DISCORD_TOKEN")
+TOKEN: str | None = os.getenv("DISCORD_TOKEN")
+if not TOKEN:
+    raise RuntimeError("DISCORD_TOKEN manquant dans l'environnement")
 
-# ──────────────────── IDs
-GUILD_ID = discord.Object(id=1403442529357267036)  # serveur cible
-CHANNEL_ID = 123456789012345678                   # ← ton salon texte
-FACT_CHANNEL_ID = CHANNEL_ID                      # même salon pour les faits aléatoires
+GUILD_ID = discord.Object(id=1403442529357267036)
+CHANNEL_ID = 123456789012345678
+FACT_CHANNEL_ID = CHANNEL_ID
+
+PARIS = ZoneInfo("Europe/Paris")
+
+# ──────────────────── Logs
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger("luvbot")
 
 # ──────────────────── Intents et client
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
 
-# ──────────────────── Tableau des messages horaires
-HOURLY_TEXT = {
+_started = False  # évite les doubles start sur reconnexion
+
+# ──────────────────── Messages horaires
+HOURLY_TEXT: dict[int, str] = {
     7:  "🤖 bip boup... système réveillé. Deux cœurs détectés, en train de s’étirer doucement.",
     8:  "☕ boup... capteurs olfactifs activés : douceur matin.",
     9:  "🛠️ analyse en cours... activité humaine : productive mais pleine de tendresse.",
@@ -43,81 +56,96 @@ HOURLY_TEXT = {
 }
 
 def next_run_times() -> list[time]:
-    return [time(h) for h in HOURLY_TEXT]
+    # heures Europe/Paris correctes pour tasks.loop
+    return [time(h, tzinfo=PARIS) for h in HOURLY_TEXT]
 
 # ──────────────────── Tâche horaire
 @tasks.loop(time=next_run_times())
-async def hourly_message():
+async def hourly_message() -> None:
     channel = client.get_channel(CHANNEL_ID)
     if not channel:
         return
-    now_hour = datetime.now().hour
+    now_hour = datetime.now(PARIS).hour
     msg = HOURLY_TEXT.get(now_hour)
     if msg:
         await channel.send(msg)
 
 # ──────────────────── Tâche pour faits aléatoires
-async def envoyer_fait_bienness():
+async def envoyer_fait_bienness() -> None:
     await client.wait_until_ready()
-    horaires = [time(h, 30) for h in range(7, 22, 2)]
+    horaires = [time(h, 30, tzinfo=PARIS) for h in range(7, 22, 2)]
+    session_timeout = aiohttp.ClientTimeout(total=6)
 
     while not client.is_closed():
-        now = datetime.now()
-        prochain = None
-        for h in horaires:
-            if now.time() < h:
-                prochain = h
-                break
-        if not prochain:
-            next_run = datetime.combine(now.date() + timedelta(days=1), horaires[0])
-        else:
-            next_run = datetime.combine(now.date(), prochain)
-
-        wait_sec = (next_run - now).total_seconds()
-        print(f"Prochain fait à envoyer à {next_run.time()} (dans {int(wait_sec)}s)")
-        await asyncio.sleep(wait_sec)
+        now = datetime.now(PARIS)
+        prochain: time | None = next((h for h in horaires if now.timetz() < h), None)
+        next_run = datetime.combine(
+            (now.date() + timedelta(days=1)) if not prochain else now.date(),
+            horaires[0] if not prochain else prochain,
+            tzinfo=PARIS
+        )
+        wait_sec = max(0, int((next_run - now).total_seconds()))
+        log.info("Prochain fait à %s dans %ss", next_run.time().strftime("%H:%M:%S"), wait_sec)
+        try:
+            await asyncio.sleep(wait_sec)
+        except asyncio.CancelledError:
+            log.info("Tâche 'faits' annulée")
+            return
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get("https://uselessfacts.jsph.pl/random.json?language=fr") as resp:
+            async with aiohttp.ClientSession(timeout=session_timeout) as session:
+                async with session.get(
+                    "https://uselessfacts.jsph.pl/random.json?language=fr",
+                    headers={"Accept": "application/json"}
+                ) as resp:
+                    if resp.status != 200:
+                        raise RuntimeError(f"HTTP {resp.status}")
                     data = await resp.json()
-                    fait = data.get("text", "Rien à déclarer.")
+                    fait = data.get("text") or "Rien à déclarer."
             channel = client.get_channel(FACT_CHANNEL_ID)
             if channel:
                 await channel.send(f"📚 Fait aléatoire : {fait}")
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
-            print(f"Erreur fetch fait : {e}")
+            log.warning("Erreur fetch fait: %s", e)
 
 # ──────────────────── Événement ready
 @client.event
-async def on_ready():
-    print(f"✅ Connecté en tant que {client.user.name}")
-    tree.copy_global_to(guild=GUILD_ID)
-    await tree.sync(guild=GUILD_ID)
-    await tree.sync()
-    hourly_message.start()
-    client.loop.create_task(envoyer_fait_bienness())
-    print("🔧 Slash commands synchronisées + Tâches démarrées")
+async def on_ready() -> None:
+    global _started
+    log.info("Connecté en tant que %s", client.user.name if client.user else "unknown")
+    if not _started:
+        # sync une fois côté guilde pour vitesse, puis global si tu veux
+        tree.copy_global_to(guild=GUILD_ID)
+        await tree.sync(guild=GUILD_ID)
+        # await tree.sync()  # optionnel, plus lent, à activer si tu veux du global
+        if not hourly_message.is_running():
+            hourly_message.start()
+        asyncio.create_task(envoyer_fait_bienness())
+        _started = True
+        log.info("Slash commands synchronisées + Tâches démarrées")
 
-# ──────────────────── Commande love
+# ──────────────────── Slash commands
 @tree.command(name="love", description="Depuis combien de temps vous êtes ensemble", guild=GUILD_ID)
-async def love_command(interaction: discord.Interaction):
-    debut = datetime(2025, 3, 31)
-    diff  = datetime.now() - debut
-    mois, jours = divmod(diff.days, 30)
-    message = f"🕰️ Ça fait **{mois} mois, {jours} jours** qu'on se parle.\nChaque jour compte. ❤️"
+async def love_command(interaction: discord.Interaction) -> None:
+    debut = datetime(2025, 3, 31, tzinfo=PARIS)
+    now = datetime.now(PARIS)
+    delta = relativedelta(now, debut)
+    message = (
+        f"🕰️ Ça fait {delta.years} ans, {delta.months} mois, {delta.days} jours."
+        "\nChaque jour compte. ❤️"
+    )
     await interaction.response.send_message(message)
 
-# ──────────────────── Commande coeur
 @tree.command(name="coeur", description="Affiche une ligne de cœurs aléatoires", guild=GUILD_ID)
-async def coeur_command(interaction: discord.Interaction):
+async def coeur_command(interaction: discord.Interaction) -> None:
     ligne = random.choice(['❤️','💜','💙','💚','💛','🖤','🤍','🤎']) * 10
     await interaction.response.send_message(ligne)
 
-# ──────────────────── Commande 8ball
 @tree.command(name="8ball", description="Pose une question à la boule magique", guild=GUILD_ID)
 @app_commands.describe(question="Pose ta question existentielle ici")
-async def eightball(interaction: discord.Interaction, question: str):
+async def eightball(interaction: discord.Interaction, question: str) -> None:
     choix = random.choice([
         ("✨ Absolument", "Les astres sont alignés."),
         ("🌘 Non, et de loin", "Évite ça à tout prix."),
@@ -128,15 +156,15 @@ async def eightball(interaction: discord.Interaction, question: str):
         ("🧠 Réfléchis encore", "Tu connais déjà la réponse."),
         ("🦋 Laisse le temps faire", "Tout s’éclairera.")
     ])
-    titre, réponse = choix
+    titre, reponse = choix
     embed = Embed(
         title="🎱 Boule magique",
         description=f"**Question :** {question}",
-        color=random.choice([0x9b59b6, 0x3498db, 0xe74c3c, 0x2ecc71])
     )
-    embed.add_field(name="🗯️ Réponse", value=f"{titre} – {réponse}", inline=False)
+    embed.add_field(name="🗯️ Réponse", value=f"{titre} — {reponse}", inline=False)
     embed.set_footer(text=f"Demande de {interaction.user.display_name}")
     await interaction.response.send_message(embed=embed)
 
 # ──────────────────── Lancement bot
-client.run(TOKEN)
+if __name__ == "__main__":
+    client.run(TOKEN)
