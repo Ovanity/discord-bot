@@ -3,6 +3,7 @@ from discord import app_commands
 import os
 from dotenv import load_dotenv
 from datetime import datetime
+import random
 
 # Charger les variables d'environnement (.env)
 load_dotenv()
@@ -33,14 +34,9 @@ async def on_ready():
     print("🌐 Slash commands synchronisées globalement")
 
 
-# Slash command disponible dans ton serveur uniquement pour l’instant
-@tree.command(name="ping", description="Répond pong yeah yeah ça fonctionne", guild=GUILD_ID)
-async def ping_command(interaction: discord.Interaction):
-    await interaction.response.send_message("pong")
-
 
 # Commande romantique /depuis
-@tree.command(name="depuis", description="Depuis combien de temps vous êtes ensemble", guild=GUILD_ID)
+@tree.command(name="love", description="Depuis combien de temps vous êtes ensemble", guild=GUILD_ID)
 async def depuis_command(interaction: discord.Interaction):
     debut = datetime(2025, 3, 31)
     maintenant = datetime.now()
@@ -57,6 +53,14 @@ async def depuis_command(interaction: discord.Interaction):
 
     # 🔓 Visible par tout le monde
     await interaction.response.send_message(message)
+
+
+@tree.command(name="coeur", description="Affiche une ligne de cœurs aléatoires", guild=GUILD_ID)
+async def coeur_command(interaction: discord.Interaction):
+    emojis = ['❤️', '💜', '💙', '💚', '💛', '🖤', '🤍', '🤎']
+    e = random.choice(emojis)
+    ligne = e * 10  # 10 cœurs sur une ligne
+    await interaction.response.send_message(ligne)
 
 
 # Lancer le bot
