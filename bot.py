@@ -55,7 +55,8 @@ async def depuis_command(interaction: discord.Interaction):
         f"Chaque jour compte, Lilya. ❤️"
     )
 
-    await interaction.response.send_message(message, ephemeral=True)
+    # 🔓 Visible par tout le monde
+    await interaction.response.send_message(message)
 
 
 # Lancer le bot
