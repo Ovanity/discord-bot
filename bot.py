@@ -19,9 +19,8 @@ if not TOKEN:
     raise RuntimeError("DISCORD_TOKEN manquant dans l'environnement")
 
 GUILD_ID = discord.Object(id=1403442529357267036)
-CHANNEL_ID = 123456789012345678
+CHANNEL_ID = 1403442529885487267  # ← mets l'ID réel
 FACT_CHANNEL_ID = CHANNEL_ID
-
 PARIS = ZoneInfo("Europe/Paris")
 
 # ──────────────────── Logs
@@ -32,7 +31,6 @@ log = logging.getLogger("luvbot")
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
-
 _started = False  # évite les doubles start sur reconnexion
 
 # ──────────────────── Messages horaires
@@ -56,7 +54,6 @@ HOURLY_TEXT: dict[int, str] = {
 }
 
 def next_run_times() -> list[time]:
-    # heures Europe/Paris correctes pour tasks.loop
     return [time(h, tzinfo=PARIS) for h in HOURLY_TEXT]
 
 # ──────────────────── Tâche horaire
@@ -110,16 +107,28 @@ async def envoyer_fait_bienness() -> None:
         except Exception as e:
             log.warning("Erreur fetch fait: %s", e)
 
-# ──────────────────── Événement ready
+# ──────────────────── Événement ready (unique)
 @client.event
 async def on_ready() -> None:
     global _started
     log.info("Connecté en tant que %s", client.user.name if client.user else "unknown")
+
+    # Message de test pour diagnostiquer les perms
+    try:
+        ch = client.get_channel(CHANNEL_ID) or await client.fetch_channel(CHANNEL_ID)
+        await ch.send("✅ Bot démarré. (message de test)")
+        log.info("Message de test envoyé dans #%s", getattr(ch, "name", CHANNEL_ID))
+    except discord.Forbidden:
+        log.error("⛔ Pas la permission d'envoyer des messages dans CHANNEL_ID=%s", CHANNEL_ID)
+    except discord.HTTPException as e:
+        log.error("HTTPException en envoyant le message de test: %s", e)
+    except Exception as e:
+        log.error("Erreur inattendue: %r", e)
+
     if not _started:
-        # sync une fois côté guilde pour vitesse, puis global si tu veux
         tree.copy_global_to(guild=GUILD_ID)
         await tree.sync(guild=GUILD_ID)
-        # await tree.sync()  # optionnel, plus lent, à activer si tu veux du global
+        # await tree.sync()  # si tu veux poussé en global aussi
         if not hourly_message.is_running():
             hourly_message.start()
         asyncio.create_task(envoyer_fait_bienness())
@@ -127,6 +136,25 @@ async def on_ready() -> None:
         log.info("Slash commands synchronisées + Tâches démarrées")
 
 # ──────────────────── Slash commands
+@tree.command(name="debug_perms", description="Vérifie les permissions dans ce salon", guild=GUILD_ID)
+async def debug_perms(inter: discord.Interaction) -> None:
+    perms = inter.channel.permissions_for(inter.guild.me)
+    missing = []
+    need = {
+        "view_channel": "Voir le salon",
+        "send_messages": "Envoyer des messages",
+        "embed_links": "Intégrer des liens",
+        "read_message_history": "Lire l'historique",
+        "use_external_emojis": "Emojis externes (optionnel)"
+    }
+    for attr, label in need.items():
+        if not getattr(perms, attr, False):
+            missing.append(label)
+    if missing:
+        await inter.response.send_message("⛔ Permissions manquantes: " + ", ".join(missing), ephemeral=True)
+    else:
+        await inter.response.send_message("✅ Permissions OK ici.", ephemeral=True)
+
 @tree.command(name="love", description="Depuis combien de temps vous êtes ensemble", guild=GUILD_ID)
 async def love_command(interaction: discord.Interaction) -> None:
     debut = datetime(2025, 3, 31, tzinfo=PARIS)
@@ -157,10 +185,7 @@ async def eightball(interaction: discord.Interaction, question: str) -> None:
         ("🦋 Laisse le temps faire", "Tout s’éclairera.")
     ])
     titre, reponse = choix
-    embed = Embed(
-        title="🎱 Boule magique",
-        description=f"**Question :** {question}",
-    )
+    embed = Embed(title="🎱 Boule magique", description=f"**Question :** {question}")
     embed.add_field(name="🗯️ Réponse", value=f"{titre} — {reponse}", inline=False)
     embed.set_footer(text=f"Demande de {interaction.user.display_name}")
     await interaction.response.send_message(embed=embed)
